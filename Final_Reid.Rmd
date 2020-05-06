@@ -1,0 +1,225 @@
+---
+title: "Final Project"
+author: "Miranda Reid"
+date: "4/15/2020"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning= FALSE, message = FALSE)
+```
+Import Data
+```{r}
+library(readxl)
+data <- read_excel("Data.xlsx")
+```
+
+##First get descriptive statistics and set up a table 1 
+
+Step one - check out normality of continuous variables to determine appropriate descriptive statistics
+```{r}
+# are they normally distributed?
+
+library(ggplot2)
+ggplot(data = data, aes(x = IR_2wk)) + geom_histogram()
+ggplot(data = data, aes(x = Prev_2wk)) + geom_histogram()
+ggplot(data = data, aes(x = Pop_2019)) + geom_histogram()
+ggplot(data = data, aes(x = pubtrans)) + geom_histogram()
+ggplot(data = data, aes(x = Density)) + geom_histogram()
+ggplot(data = data, aes(x = uninsured)) + geom_histogram()
+ggplot(data = data, aes(x = age)) + geom_histogram()
+ggplot(data = data, aes(x = male)) + geom_histogram()
+ggplot(data = data, aes(x = white)) + geom_histogram()
+ggplot(data = data, aes(x = hisp)) + geom_histogram()
+ggplot(data = data, aes(x = income)) + geom_histogram()
+
+#male and uninsured are the only ones that look even sort of normally distributed, so will probably just use median and iqr for all of them 
+
+
+```
+
+
+```{r}
+# open tableone package
+library(tableone)
+
+# create table from all variables
+incid.table <- CreateTableOne(vars = c('IR_2wk',
+                                       'Prev_2wk',
+                                      'Pop_2019', 
+                                      'pubtrans',
+                                      'Density',
+                                      'uninsured',
+                                      'age',
+                                      'male',
+                                      'white',
+                                      'hisp',
+                                      'income',
+                                      'Gov'), data = data)
+
+# indicate which variables are non-normal
+# add argument to print every category of categorical
+print(incid.table, nonnormal = c('IR_2wk', 'Prev_2wk','Pop_2019',  'pubtrans','Density', 'uninsured', 'age', 'male', 'white', 'hisp', 'income'),showAllLevels = TRUE)
+
+```
+
+
+
+Run the below code to create RR function for generating IRRs and 95% CIs for Poisson models only.
+```{r}
+glm.RR <- function(GLM.RESULT, digits = 2) {
+
+    if (GLM.RESULT$family$family == "binomial") {
+        LABEL <- "OR"
+    } else if (GLM.RESULT$family$family == "poisson") {
+        LABEL <- "RR"
+    } else {
+        stop("Not logistic or Poisson model")
+    }
+
+    COEF      <- stats::coef(GLM.RESULT)
+    CONFINT   <- stats::confint(GLM.RESULT)
+    TABLE     <- cbind(coef=COEF, CONFINT)
+    TABLE.EXP <- round(exp(TABLE), digits)
+
+    colnames(TABLE.EXP)[1] <- LABEL
+
+    TABLE.EXP
+}
+```
+
+
+Opening Packages
+```{r}
+# Load MASS for negative bin
+library(MASS)
+# Load ggplot for graphing
+library(ggplot2)
+# Load lmtest library for coeftest
+library(lmtest)
+# Load sandwich library for robust estimator
+library(sandwich)
+#load stargazer library to view a comparison of standard errors
+library(stargazer)
+```
+
+Examining distribution
+```{r}
+#make a density plot to look at distribution of incidence rate at week 1
+c <- density(data$IR_1wk)
+plot(c, xlim=c(0,5))
+
+#make a density plot to look at distribution of incidence rate at week 2
+d <- density(data$IR_2wk)
+plot(d, xlim=c(0,10))
+
+#make a density plot to look at distribution of prevalence rate at week 1
+e <- density(data$Prev_1wk)
+plot(e, xlim=c(0,10))
+
+#make a density plot to look at distribution of prevalence rate at week 2
+f <- density(data$Prev_2wk)
+plot(f, xlim=c(0,26))
+
+#overall they're all right skewed so a Poisson distribution is appropriate for any of them, will probably just use incidence rate and prevalence rate at week 2
+```
+
+Univariate models looking at public transit use
+```{r}
+model.pt <- glm(Prev_2wk ~ pubtrans, family ="poisson", data = data)
+summary(model.pt)
+
+```
+```{r}
+#IRRs for models created above, 2 indicates how many figures it should round to 
+glm.RR(model.pt, 2)
+```
+No significant increased rate
+
+See if overdispersion is a problem
+```{r}
+#new negative binomial models
+model.nb.pt <- glm.nb(Prev_2wk ~ pubtrans, data = data)
+summary(model.nb.pt)
+
+```
+```{r}
+#using lrtest to compare models
+lrtest(model.pt, model.nb.pt)
+```
+The likelihood ratio test is signficant (P<0.001), indicating that the negative binomial models are a signficantly better fit(because of overdispersion).
+
+```{r}
+#new multivariate NB model for pt
+model.nb.full.pt <- glm.nb(Prev_2wk ~ pubtrans + Density + age + male + white +  hisp + income + Gov, data = data)
+
+#including robust standard errors
+robust2 <- coeftest(model.nb.full.pt, vcov = sandwich)
+robust2
+est2 <- cbind(IRR = coef(model.nb.full.pt), "2.5%"=robust2[,1]-1.96*robust2[,2], 
+             "97.5%"=robust2[,1]+1.96*robust2[,2])
+exp(est2)
+```
+```{r}
+#using lrtest to compare models
+lrtest(model.nb.pt, model.nb.full.pt)
+```
+So the model including covariates is signficantly better at predicting incidence rate 
+
+
+## Dr. Johnson recommended adding population size, so I'll make a new model with it and then use the lr to see if it's a better model 
+```{r}
+#new multivariate NB model for pt including population
+model.nb.full.pt.pop <- glm.nb(Prev_2wk ~ pubtrans + Density + age + male + white +  hisp + income + Gov + Pop_2019, data = data)
+
+#including robust standard errors
+robust3 <- coeftest(model.nb.full.pt.pop, vcov = sandwich)
+robust3
+est3 <- cbind(IRR = coef(model.nb.full.pt.pop), "2.5%"=robust3[,1]-1.96*robust3[,2], 
+             "97.5%"=robust3[,1]+1.96*robust3[,2])
+exp(est3)
+```
+Public transit use is not signficant regardless, but in this new model density is no longer significant as well
+
+```{r}
+#using lrtest to compare models
+lrtest(model.nb.full.pt, model.nb.full.pt.pop)
+```
+The model including population size is  significantly better, so will include it in final analysis
+
+##Also doing a model with incidence rate at 2 weeks 
+Looking at univariate poisson vs negative binomial model first
+```{r}
+#new poisson model for IR
+model.pt.ir <- glm(IR_2wk ~ pubtrans, family ="poisson", data = data)
+#new negative binomial model for IR
+model.nb.pt.ir <- glm.nb(IR_2wk ~ pubtrans, data = data)
+
+#likelihood ratio test to compare
+lrtest(model.pt.ir, model.nb.pt.ir)
+```
+The likelihood ratio test is signficant (P<0.001), indicating that the negative binomial models are a signficantly better fit(because of overdispersion).
+
+```{r}
+#new multivariate NB model for IR
+model.nb.full.ir <- glm.nb(IR_2wk ~ pubtrans + Density + age + male + white +  hisp + income + Gov + Pop_2019, data = data)
+
+#including robust standard errors
+robust4 <- coeftest(model.nb.full.ir, vcov = sandwich)
+robust4
+est4 <- cbind(IRR = coef(model.nb.full.ir), "2.5%"=robust4[,1]-1.96*robust4[,2], 
+             "97.5%"=robust4[,1]+1.96*robust4[,2])
+exp(est4)
+```
+Percent hispanic is the only IRR that is significant in a meaningful way, density is technically significant but not in any way that  would impact policy 
+
+FInally comparing multivariate to univariate model
+```{r}
+#likelihood ratio test to compare
+lrtest(model.nb.pt.ir, model.nb.full.ir)
+```
+Significantly better, so should definitely stick with this model over univariate
+
+
