@@ -6,4 +6,6 @@ My code is in the RMD.
 
 My final paper is in the word document.
 
+Dag is the jpg
+
 Thanks for a great semester!
